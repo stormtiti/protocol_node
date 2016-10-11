@@ -32,7 +32,7 @@ include_directories(
 )
 
 ## Declare a C++ executable
-add_executable(${PROJECT_NAME} src/main.cc)
+add_executable(${PROJECT_NAME} src/main.cc src/autostate.cc src/serialport.cc)
 target_link_libraries(${PROJECT_NAME}
   ${catkin_LIBRARIES}
 )
