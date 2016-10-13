@@ -9,6 +9,7 @@ public:
 	/// Set Receive
 	/// AcktoAndriod
 	int fd; /* File descriptor for the port */
+	fd_set rd;
 	void writeData(unsigned char *data,int num);
 	char data0,data1;
 

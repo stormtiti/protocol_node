@@ -11,6 +11,7 @@
 #define GOTO_STATE 			0x71
 #define GOTO_ACK_PROCESS	0x72
 #define GOTO_ACK_ARRIVE		0x73
+#define INITIALPOSE_STATE	0x74
 #define PAUSE_STATE 		0x80
 #define TERMINATE_STATE 	0x90
 
@@ -32,11 +33,20 @@ public:
     unsigned char naviStateBack;
     unsigned char goto_aim;
     unsigned char goto_aimBak;
+    unsigned char goto_goalStatus;
+    int 		  goto_aimDelay;
+    bool		  sendgoalFLag;
 
     unsigned char state_cmd;
     unsigned char state_dest;
 
     unsigned char navAck;
+    unsigned char initFlag;
+    char 		  inittimes;
+    unsigned char initialPose_aim;
+    unsigned char initialPose_aimBak;
+
+    pthread_t AutoStateRecCmd_thread;
 	pthread_t AutoState_thread;
 	geometry_msgs::Twist cmd_vel;
 	geometry_msgs::PoseWithCovarianceStamped robot_pose;

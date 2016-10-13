@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <termios.h>
+#include <sys/types.h>
 #include "serialport.h"
 #define BUFFER_LENGTH 1024  //Max length of buffer
 
@@ -19,11 +20,11 @@ SerialPort::SerialPort()
 	struct termios options_old, options;
 	fd = open("/dev/ttyS1", O_RDWR | O_NOCTTY | O_NDELAY);
 	if (fd < 0) { /** error **/
-		 printf("[%s-%d] open error!!!\n", __FILE__, __LINE__);
+		 printf("[%s-%d] open ttyS1 error!!!\n", __FILE__, __LINE__);
 	}
 	else
 	{
-	  printf("open success!!!\n");
+	  printf("open ttyS1 success!!!\n");
 	}
 	fcntl(fd, F_SETFL, 0);
 	/** * Get the current options for the port... **/
@@ -52,18 +53,37 @@ SerialPort::~SerialPort()
 
 void *spReadHandle_thread(void* ptr)
 {
+
 	SerialPort *me=(SerialPort*) ptr;
+	struct timeval timeout;
 	char buf[BUFFER_LENGTH];
-	while(true)
+	while(1)
 	{
-		iRet = read(me->fd, buf, BUFFER_LENGTH);
-		if(iRet > 0)
+		FD_ZERO(&me->rd);
+		FD_SET(me->fd,&me->rd);
+	    timeout.tv_sec = 0;
+	    timeout.tv_usec = 200000;//200ms
+		switch (select(me->fd+1, &me->rd, NULL,NULL, &timeout))
 		{
-			me->data0 = buf[0];
-			me->data1 = buf[1];
+		  case -1:
+		    printf("select err\n");
+		    break;
+		  case 0: //select timeout
+		    me->data0 = 0xFF;
+		    me->data1 = 0xFF;
+		    break;
+		  default:
+		    if (FD_ISSET(me->fd,&me->rd)) {
+		    	iRet = read(me->fd, buf, BUFFER_LENGTH);
+				if(iRet > 0)
+				{
+					me->data0 = buf[0];
+					me->data1 = buf[1];
+				}
+//		    	tcflush(me->fd,TCIFLUSH); // 清除正收到的数据，且不会读取出来。
+		     }
+		    break;
 		}
-		tcflush(me->fd,TCIFLUSH); // 清除正收到的数据，且不会读取出来。
-		usleep(50000);//50ms
 	}
 }
 void SerialPort::writeData(unsigned char *data,int num)
@@ -72,11 +92,6 @@ void SerialPort::writeData(unsigned char *data,int num)
 	if(write(fd,data, num) < 0)
 	{
 		printf("write serialport failed \n");
-	}
-	else
-	{
-
-		printf("write serialport success %d,%d,%d \n",*data,*(data+1),num);
 	}
 }
 

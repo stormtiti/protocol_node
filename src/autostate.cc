@@ -34,6 +34,7 @@ using namespace std;
 #define FALSE  -1
 #define TRUE   0
 void *autostateHandle_thread(void* ptr);
+void *autostateRecCmdHandle_thread(void *ptr);
 typedef struct{
 	char name;
 	double x;
@@ -43,10 +44,10 @@ typedef struct{
 tag_pos tagPos[100];
 void readfilefstream()
 {
-	std::ifstream infile("init_pose");
+	std::ifstream infile("/root/work_space/devel/lib/gui_node/init_pose");
 	if(!infile.is_open())
 	{
-		printf("open failure \n");
+		printf("open /root/work_space/devel/lib/gui_node/init_pose failure \n");
 	}
 	else
 	{
@@ -62,7 +63,6 @@ void readfilefstream()
 			tagPos[i].x = x;
 			tagPos[i].y = y;
 			tagPos[i].theta = theta;
-			printf("%d,%f,%f,%f \n",name,x,y,theta);
 			i++;
 		}
 	}
@@ -71,32 +71,31 @@ void readfilefstream()
 
 AutoState::AutoState()
 {
-	  pub_ = n_.advertise<geometry_msgs::Twist>("cmd_vel", 1);
-	  Goal_pub = n_.advertise<actionlib_msgs::GoalID>("/move_base/cancel",10);
-	  Init_pos_pub = n_.advertise<geometry_msgs::PoseWithCovarianceStamped>("initialpose",10);
+	pub_ = n_.advertise<geometry_msgs::Twist>("cmd_vel", 1);
+	Goal_pub = n_.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 10);
+	Pause_pub = n_.advertise<actionlib_msgs::GoalID>("/move_base/cancel", 10);
+	Init_pos_pub = n_.advertise<geometry_msgs::PoseWithCovarianceStamped>("initialpose",10);
 
-	  State = MANUAL;
-	  StateBack = MANUAL;
-	  manualState = MANUAL_STOP;
-	  naviState = TERMINATE_STATE;
-	  naviStateBack = TERMINATE_STATE;
-	  goto_aim = 0;
-	  goto_aimBak = 0;
-	  state_cmd = MANUAL;
-	  state_dest = 0;
+	State = MANUAL;
+	StateBack = MANUAL;
+	manualState = MANUAL_STOP;
+	naviState = TERMINATE_STATE;
+	naviStateBack = TERMINATE_STATE;
+	goto_aim = 0;
+	goto_aimBak = 0;
+	state_cmd = MANUAL;
+	state_dest = 0;
+	readfilefstream();
+	int stateRecthread;
+	if ((stateRecthread = pthread_create(&AutoStateRecCmd_thread, NULL, autostateRecCmdHandle_thread, (void*)(this))))
+	{
+		printf("Thread2 creation failed: %d\n", stateRecthread);
+	}
 	int statethread;
 	if ((statethread = pthread_create(&AutoState_thread, NULL, autostateHandle_thread, (void*)(this))))
 	{
 		printf("Thread2 creation failed: %d\n", statethread);
 	}
-	readfilefstream();
-	ROS_INFO("[initialpose]%f,%f\n",tagPos[0].x,tagPos[0].y);
-	for(int i = 0; i < 10 ; i++)
-	{
-		SendInitPos(tagPos[0].x,tagPos[0].y,tagPos[0].theta);
-		usleep(10000);// 10ms
-	}
-
 }
 
 AutoState::~AutoState()
@@ -111,22 +110,22 @@ void AutoState::SendNextPos(Pos ps){
   goal.pose.position.x = ps.x;
   goal.pose.position.y = ps.y;
   goal.pose.position.z = 0;
-  goal.pose.orientation.x = 0;
-  goal.pose.orientation.y = 0;
-  goal.pose.orientation.z = ps.a;
-  goal.pose.orientation.w = sqrt(1-ps.a*ps.a);
-  ROS_INFO("Sending Next pos");
-
+  tf::Quaternion quat = tf::createQuaternionFromYaw(ps.a);
+  goal.pose.orientation.x = quat.x();
+  goal.pose.orientation.y = quat.y();
+  goal.pose.orientation.z = quat.z();
+  goal.pose.orientation.w = quat.w();
+ // ROS_INFO("Sending Next pos");
   Goal_pub.publish(goal);
-
-//  b_destination = false;
 }
 
 void AutoState::SendStop(){
 	actionlib_msgs::GoalID cmd_stop;
 	cmd_stop.stamp=ros::Time::now();
 	cmd_stop.id="0";
+//	ROS_INFO("Sending Stop pos before");
 	Pause_pub.publish(cmd_stop);
+//	ROS_INFO("Sending Stop pos end");
 }
 
 
@@ -146,29 +145,16 @@ void AutoState::SendInitPos(float x, float y,float a){
   initialpose.pose.pose.orientation.z = quat.z();
   initialpose.pose.pose.orientation.w = quat.w();
 
-
-//  initialpose.pose.pose.orientation.x = 0;
-//  initialpose.pose.pose.orientation.y = 0;
-//  initialpose.pose.pose.orientation.z = a;
-//  initialpose.pose.pose.orientation.w =sqrt(1-a*a);
-
-  int i;
-  for(i=0;i<36;i++) initialpose.pose.covariance.elems[i]=0;
+  for(int i = 0; i < 36; i++) initialpose.pose.covariance.elems[i]=0;
   initialpose.pose.covariance.elems[0]=0.8;
   initialpose.pose.covariance.elems[7]=0.8;
   initialpose.pose.covariance.elems[35]=0.5;
 
-//  robot_pose.pose.pose.position.x=x;
-//  robot_pose.pose.pose.position.y=y;
-////  robot_pose.pose.pose.orientation.z=a;
-////  robot_pose.pose.pose.orientation.w=sqrt(1-a*a);
-//  robot_pose.pose.pose.orientation = tf::createQuaternionFromYaw(a);
-
-  ROS_INFO("Sending Init pos before");
-  ROS_INFO("[initialpose]%f,%f\n",
-		  initialpose.pose.pose.position.x,initialpose.pose.pose.position.y);
+//  ROS_INFO("Sending Init pos before");
   Init_pos_pub.publish(initialpose);
-  ROS_INFO("Sending Init pos end");
+//  ROS_INFO("Sending Init pos end");
+
+
 
 }
 
@@ -187,46 +173,61 @@ void AutoState::setReceive(unsigned char cmd, unsigned char dest)
 
 int AutoState::AcktoAndriod(unsigned char &ack,unsigned char &dest)
 {
-	if((State == AUTO_NAVI) && (naviState == GOTO_STATE))
+	if(StateBack == MANUAL)
 	{
-		for(int i = 0; i < 10; i++)
+		ack = MANUAL;
+		dest = 0;
+	}
+	else if(StateBack == AUTO_NAVI)
+	{
+		switch(naviStateBack)
 		{
-			if(goto_aim == tagPos[i].name)
+		case GOTO_STATE:
+			if(goto_goalStatus != GOTO_ACK_ARRIVE)
 			{
-				Pos pos;
-				pos.x = tagPos[i].x;
-				pos.y = tagPos[i].y;
-				pos.a = tagPos[i].theta;
-				if((abs(robot_pose.pose.pose.position.x - pos.x) < 0.3)
-					&& (abs(robot_pose.pose.pose.position.y - pos.y) < 0.3))
+				for(int i = 0; i < 10; i++)
 				{
-					ack = navAck;
-					ack = GOTO_ACK_ARRIVE;
-					dest = tagPos[i].name;
-				}
-				else
-				{
-					ack = navAck;
-					ack = GOTO_ACK_PROCESS;
-					dest = tagPos[i].name;
+					if(goto_aim == tagPos[i].name)
+					{
+						Pos pos;
+						pos.x = tagPos[i].x;
+						pos.y = tagPos[i].y;
+						pos.a = tagPos[i].theta;
+						if((abs(robot_pose.pose.pose.position.x - pos.x) < 0.3)
+							&& (abs(robot_pose.pose.pose.position.y - pos.y) < 0.3))
+						{
+							goto_goalStatus = GOTO_ACK_ARRIVE;
+							ack = GOTO_ACK_ARRIVE;
+							dest = tagPos[i].name;
+
+						}
+						else
+						{
+							goto_goalStatus = GOTO_ACK_PROCESS;
+							ack = GOTO_ACK_PROCESS;
+							dest = tagPos[i].name;
+						}
+					}
 				}
 			}
+			break;
+		case PAUSE_STATE:
+			ack = PAUSE_STATE;
+			dest = 0;
+			break;
+		case TERMINATE_STATE:
+			ack = TERMINATE_STATE;
+			dest = 0;
+			break;
 		}
-		return 0;
 	}
-	else
-	{
-		ack = 0;
-		return -1;
-	}
+	return 0;
 }
-
-void *autostateHandle_thread(void* ptr)
+void *autostateRecCmdHandle_thread(void* ptr)
 {
-    AutoState *me=(AutoState*) ptr;
-    printf("autostateHandle_thread \n");
-    while(true)
-    {
+	 AutoState *me=(AutoState*) ptr;
+	while(true)
+	{
 		///////////////receive from android//////////////////
 		switch(me->state_cmd)
 		{
@@ -257,6 +258,7 @@ void *autostateHandle_thread(void* ptr)
 				me->manualState = MANUAL_RIGHT;
 			}
 			break;
+		case 0xFF://read timeout 200ms
 		case MANUAL_STOP:
 			if(me->State == MANUAL)
 			{
@@ -269,7 +271,12 @@ void *autostateHandle_thread(void* ptr)
 		case GOTO_STATE:
 			if(me->State == AUTO_NAVI)
 			{
+				me->sendgoalFLag = false;
+				me->goto_aimDelay = 0;
+				me->goto_goalStatus = GOTO_ACK_PROCESS;
+				me->goto_aim = me->state_dest;
 				me->naviState = GOTO_STATE;
+//				printf("AUTO_NAVI GotoState \n");
 			}
 			break;
 		case PAUSE_STATE:
@@ -284,10 +291,27 @@ void *autostateHandle_thread(void* ptr)
 				me->naviState = TERMINATE_STATE;
 			}
 			break;
+		case INITIALPOSE_STATE:
+			if(me->State == AUTO_NAVI)
+			{
+				me->initialPose_aim = me->state_dest;
+				me->naviState = INITIALPOSE_STATE;
+				me->inittimes = 10;
+			}
+			break;
 		default:
 			me->State = 0;
 			break;
 		}
+		usleep(50000);//50ms
+	}
+}
+
+void *autostateHandle_thread(void* ptr)
+{
+	AutoState *me=(AutoState*) ptr;
+	while(true)
+	{
     	//handle
     	switch(me->State)
     	{
@@ -298,87 +322,101 @@ void *autostateHandle_thread(void* ptr)
     			me->cmd_vel.linear.x  = 0.3;
     			me->cmd_vel.linear.y  = 0.0;
     			me->cmd_vel.angular.z = 0.0;
-    			ROS_INFO("Robot Forward Move !");
     			break;
     		case MANUAL_BACKWARD:
-    			me->cmd_vel.linear.x  = -0.3;
+    			me->cmd_vel.linear.x  = -0.15;
     			me->cmd_vel.linear.y  = 0.0;
     			me->cmd_vel.angular.z = 0.0;
-    			ROS_INFO("Robot Backward Move !");
     			break;
     		case MANUAL_LEFT:
     			me->cmd_vel.linear.x  = 0.0;
     			me->cmd_vel.linear.y  = 0.0;
     			me->cmd_vel.angular.z = 0.6;
-    			ROS_INFO("Robot Turn Left");
     			break;
     		case MANUAL_RIGHT:
     			me->cmd_vel.linear.x  = 0.0;
     			me->cmd_vel.linear.y  = 0.0;
     			me->cmd_vel.angular.z = -0.6;
-    			ROS_INFO("Robot Turn Right");
     			break;
     		case MANUAL_STOP:
     			me->cmd_vel.linear.x  = 0.0;
     			me->cmd_vel.linear.y  = 0.0;
     			me->cmd_vel.angular.z = 0.0;
-    			ROS_INFO("Robot MANUAL_STOP");
     			break;
     		default:
     			me->cmd_vel.linear.x  = 0.0;
     			me->cmd_vel.linear.y  = 0.0;
     			me->cmd_vel.angular.z = 0.0;
     			me->manualState = MANUAL_STOP;
-    			ROS_INFO("Robot MANUAL_default");
     			break;
     		}
     		me->pub_.publish(me->cmd_vel);
     		me->StateBack = MANUAL;
     		break;
     	case AUTO_NAVI:
-    		ROS_INFO("Robot AUTO_NAVI Move !");
     		switch(me->naviState)
     		{
     		case GOTO_STATE:
-    			if(me->naviStateBack == PAUSE_STATE)
+    			if((me->goto_aim != me->goto_aimBak) && (me->naviStateBack == PAUSE_STATE))
     			{
-    				if(me->goto_aim != me->goto_aimBak)
-    				{
-    					//
-    				}
+    				me->naviState = PAUSE_STATE;//
     			}
     			else
     			{
-    				ROS_INFO("Robot GOTO_STATE Move ! %d",me->goto_aim);
-    				me->goto_aim = me->state_dest;
+//    				printf("Auto Navi GotoState Send \n");
     				me->naviStateBack = GOTO_STATE;
-    				for(int i = 0; i < 10; i++)
+    				if(me->goto_goalStatus != GOTO_ACK_ARRIVE)
     				{
-    					if(me->goto_aim == tagPos[i].name)
-    					{
-    						Pos pos;
-    						pos.x = tagPos[i].x;
-    						pos.y = tagPos[i].y;
-    						pos.a = tagPos[i].theta;
-    						me->SendNextPos(pos);
-    					}
+        				for(int i = 0; i < 10; i++)
+        				{
+        					if(me->goto_aim == tagPos[i].name)
+        					{
+        						Pos pos;
+        						pos.x = tagPos[i].x;
+        						pos.y = tagPos[i].y;
+        						pos.a = tagPos[i].theta;
+        						me->SendNextPos(pos);
+        						me->sendgoalFLag = true;
+        						me->goto_aimBak = me->goto_aim;
+
+        					}
+        				}
     				}
     			}
     			break;
     		case PAUSE_STATE:
-    			ROS_INFO("Robot PAUSE_STATE!");
-    			me->goto_aimBak = me->goto_aim;
+    			me->SendStop();
     			me->naviStateBack = PAUSE_STATE;
     			break;
     		case TERMINATE_STATE:
-    			ROS_INFO("Robot TERMINATE_STATE!");
+    			me->SendStop();
     			me->naviStateBack = TERMINATE_STATE;
     			break;
+    		case INITIALPOSE_STATE:
+    			if(me->inittimes > 0)
+    			{
+    				for(int i = 0; i < 10; i++)
+					{
+						if(me->initialPose_aim == tagPos[i].name)
+						{
+							me->SendInitPos(tagPos[i].x,tagPos[i].y,tagPos[i].theta);
+							me->initialPose_aimBak = me->initialPose_aim;
+							break;
+						}
+					}
+    				me->inittimes--;
+    				if(me->inittimes <= 0)
+    				{
+    					me->inittimes = 0;
+    				}
+    			}
+    			me->naviStateBack = INITIALPOSE_STATE;
+    			break;
     		default:
-    			ROS_INFO("Robot AUTO_NAVI default!");
     			me->naviState = TERMINATE_STATE;
     			break;
     		}
+    		sleep(1);//1s
     		me->StateBack = AUTO_NAVI;
     		break;
     	default:
@@ -388,13 +426,6 @@ void *autostateHandle_thread(void* ptr)
     	usleep(50000);//50ms
     }
 }
-
-
-///////////////get topic from navi//////////////////
-//switch()
-//{
-//
-//}
 
 
 

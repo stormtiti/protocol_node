@@ -25,82 +25,77 @@
 #include "serialport.h"
 #include <fstream>
 
-//void readfile()
-//{
-//
-//    FILE *fp1;
-//    int i;
-//    struct student
-//    {
-//        char name[1];
-//        double x;
-//        double y;
-//        double theta;
-//    }stu;
-//    if((fp1=fopen("test2.txt","rb"))==NULL)
-//    {
-//        printf("");
-//        exit(0);
-//    }
-//    printf(":\n");
-//    for (i = 0; i < 3; i++)
-//    {
-//        fread(&stu,sizeof(stu),1,fp1);
-//        printf("%s %f %f %f\n",stu.name, stu.x, stu.y,stu.theta);
-//    }
-//    fclose(fp1);
-//}
 AutoState  *myState;
 geometry_msgs::Twist cmd_vel;
 ros::Publisher move_pub;
 void updatapose(const geometry_msgs::PoseWithCovarianceStamped& acml_msgs)
 {
 	double x,y,z;
-//	robot_pose.pose.pose.position.x=pose.pose.pose.position.x;
-//	robot_pose.pose.pose.position.y=pose.pose.pose.position.y;
-//	robot_pose.pose.pose.orientation.z=pose.pose.pose.orientation.z;
 	myState->setCurrobotPos(acml_msgs);
 }
 void shutdown(int sig) {
   ROS_INFO("[GUI_Node] disconnect gui node ...");
   ros::shutdown();
 }
-char TestBuf[10][2]=
+//char TestBuf[12][2]=
+//{
+//MANUAL,0,
+//MANUAL_FORWARD,0,
+//MANUAL_BACKWARD,0,
+//MANUAL_LEFT,0,
+//MANUAL_RIGHT,0,
+//MANUAL_STOP,0,
+//AUTO_NAVI,0,
+//GOTO_STATE,'B',
+//PAUSE_STATE,0,
+//GOTO_STATE,'B',
+//TERMINATE_STATE,0,
+//INITIALPOSE_STATE,'C'
+//};
+char TestBuf[12][2]=
 {
-MANUAL,0,
-MANUAL_FORWARD,0,
-MANUAL_BACKWARD,0,
-MANUAL_LEFT,0,
-MANUAL_RIGHT,0,
-MANUAL_STOP,0,
 AUTO_NAVI,0,
-GOTO_STATE,'A',
+GOTO_STATE,'B',
+0xFF,0,
+0xFF,0,
+0xFF,0,
+0xFF,0,
 PAUSE_STATE,0,
-TERMINATE_STATE,0,
+0xFF,0,
+0xFF,0,
+GOTO_STATE,'C',
+0xFF,0,
+0xFF,0
 };
 int testCnt = 0;
 int main(int argc, char** argv) {
 
   ros::init(argc, argv, "gui_node");
   signal(SIGINT, shutdown);
-
+  static  char recback;
   ros::NodeHandle nh;
   myState = new AutoState;
   SerialPort mySerial;
   ros::Subscriber Pose_sub = nh.subscribe("amcl_pose",10,updatapose);
   ROS_INFO("[GUI_Node] launch ...");
   sleep(2);
-  ros::Rate loop_rate(5);
+  ros::Rate loop_rate(10);
   while (ros::ok()) {
 	unsigned char ackStatus,ackDest;
 
 //	mySerial.data0 = TestBuf[testCnt][0];
 //	mySerial.data1 = TestBuf[testCnt][1];
+
 	myState->setReceive(mySerial.data0, mySerial.data1);
-	ROS_INFO("[REC_Data]:%d,%d",mySerial.data0,mySerial.data1);
+	if(recback != mySerial.data0)
+	{
+//		 ROS_INFO("[REC_Data]:%d,%d",mySerial.data0,mySerial.data1);
+		 recback = mySerial.data0;
+	}
+
 
 	testCnt++;
-	if(testCnt >= 10)
+	if(testCnt >= 12)
 	{
 		testCnt = 0;
 	}
