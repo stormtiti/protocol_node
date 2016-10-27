@@ -76,15 +76,18 @@ AutoState::AutoState()
 	Pause_pub = n_.advertise<actionlib_msgs::GoalID>("/move_base/cancel", 10);
 	Init_pos_pub = n_.advertise<geometry_msgs::PoseWithCovarianceStamped>("initialpose",10);
 
-	State = MANUAL;
-	StateBack = MANUAL;
+	State = AUTO_NAVI;
+	StateBack = AUTO_NAVI;
 	manualState = MANUAL_STOP;
-	naviState = TERMINATE_STATE;
-	naviStateBack = TERMINATE_STATE;
+	naviState = INITIALPOSE_STATE;
+	naviStateBack = INITIALPOSE_STATE;
+	initialPose_aim = 'A';
+	inittimes = 10;
 	goto_aim = 0;
 	goto_aimBak = 0;
-	state_cmd = MANUAL;
-	state_dest = 0;
+	state_cmd = INITIALPOSE_STATE;
+	state_dest = 'A';
+	iloopCnt = 0;
 	readfilefstream();
 	int stateRecthread;
 	if ((stateRecthread = pthread_create(&AutoStateRecCmd_thread, NULL, autostateRecCmdHandle_thread, (void*)(this))))
@@ -183,30 +186,35 @@ int AutoState::AcktoAndriod(unsigned char &ack,unsigned char &dest)
 		switch(naviStateBack)
 		{
 		case GOTO_STATE:
-			if(goto_goalStatus != GOTO_ACK_ARRIVE)
+			for(int i = 0; i < 10; i++)
 			{
-				for(int i = 0; i < 10; i++)
+				if(goto_aim == tagPos[i].name)
 				{
-					if(goto_aim == tagPos[i].name)
+					Pos pos;
+					pos.x = tagPos[i].x;
+					pos.y = tagPos[i].y;
+					pos.a = tagPos[i].theta;
+					if((abs(robot_pose.pose.pose.position.x - pos.x) < 0.3)
+						&& (abs(robot_pose.pose.pose.position.y - pos.y) < 0.3))
 					{
-						Pos pos;
-						pos.x = tagPos[i].x;
-						pos.y = tagPos[i].y;
-						pos.a = tagPos[i].theta;
-						if((abs(robot_pose.pose.pose.position.x - pos.x) < 0.3)
-							&& (abs(robot_pose.pose.pose.position.y - pos.y) < 0.3))
+						goto_goalStatus = GOTO_ACK_ARRIVE;
+						ack = GOTO_ACK_ARRIVE;
+						dest = tagPos[i].name;
+						state_cmd = GOTO_STATE;
+						if(i < 7)
 						{
-							goto_goalStatus = GOTO_ACK_ARRIVE;
-							ack = GOTO_ACK_ARRIVE;
-							dest = tagPos[i].name;
-
+							state_dest = tagPos[i+1].name;
 						}
 						else
 						{
-							goto_goalStatus = GOTO_ACK_PROCESS;
-							ack = GOTO_ACK_PROCESS;
-							dest = tagPos[i].name;
+							state_dest = tagPos[0].name;
 						}
+					}
+					else
+					{
+						goto_goalStatus = GOTO_ACK_PROCESS;
+						ack = GOTO_ACK_PROCESS;
+						dest = tagPos[i].name;
 					}
 				}
 			}
@@ -276,6 +284,7 @@ void *autostateRecCmdHandle_thread(void* ptr)
 				me->goto_goalStatus = GOTO_ACK_PROCESS;
 				me->goto_aim = me->state_dest;
 				me->naviState = GOTO_STATE;
+				me->state_cmd = 0xFF;
 //				printf("AUTO_NAVI GotoState \n");
 			}
 			break;
@@ -297,6 +306,7 @@ void *autostateRecCmdHandle_thread(void* ptr)
 				me->initialPose_aim = me->state_dest;
 				me->naviState = INITIALPOSE_STATE;
 				me->inittimes = 10;
+				me->state_cmd = 0xFF;
 			}
 			break;
 		default:
@@ -316,42 +326,6 @@ void *autostateHandle_thread(void* ptr)
     	switch(me->State)
     	{
     	case MANUAL:
-    		switch(me->manualState)
-    		{
-    		case MANUAL_FORWARD:
-    			me->cmd_vel.linear.x  = 0.3;
-    			me->cmd_vel.linear.y  = 0.0;
-    			me->cmd_vel.angular.z = 0.0;
-    			break;
-    		case MANUAL_BACKWARD:
-    			me->cmd_vel.linear.x  = -0.15;
-    			me->cmd_vel.linear.y  = 0.0;
-    			me->cmd_vel.angular.z = 0.0;
-    			break;
-    		case MANUAL_LEFT:
-    			me->cmd_vel.linear.x  = 0.0;
-    			me->cmd_vel.linear.y  = 0.0;
-    			me->cmd_vel.angular.z = 0.6;
-    			break;
-    		case MANUAL_RIGHT:
-    			me->cmd_vel.linear.x  = 0.0;
-    			me->cmd_vel.linear.y  = 0.0;
-    			me->cmd_vel.angular.z = -0.6;
-    			break;
-    		case MANUAL_STOP:
-    			me->cmd_vel.linear.x  = 0.0;
-    			me->cmd_vel.linear.y  = 0.0;
-    			me->cmd_vel.angular.z = 0.0;
-    			break;
-    		default:
-    			me->cmd_vel.linear.x  = 0.0;
-    			me->cmd_vel.linear.y  = 0.0;
-    			me->cmd_vel.angular.z = 0.0;
-    			me->manualState = MANUAL_STOP;
-    			break;
-    		}
-    		me->pub_.publish(me->cmd_vel);
-    		me->StateBack = MANUAL;
     		break;
     	case AUTO_NAVI:
     		switch(me->naviState)
@@ -395,19 +369,15 @@ void *autostateHandle_thread(void* ptr)
     		case INITIALPOSE_STATE:
     			if(me->inittimes > 0)
     			{
-    				for(int i = 0; i < 10; i++)
-					{
-						if(me->initialPose_aim == tagPos[i].name)
-						{
-							me->SendInitPos(tagPos[i].x,tagPos[i].y,tagPos[i].theta);
-							me->initialPose_aimBak = me->initialPose_aim;
-							break;
-						}
-					}
+    				me->SendInitPos(tagPos[0].x,tagPos[0].y,tagPos[0].theta);
+					me->initialPose_aimBak = me->initialPose_aim;
     				me->inittimes--;
     				if(me->inittimes <= 0)
     				{
     					me->inittimes = 0;
+    					sleep(5);
+    					me->state_cmd = GOTO_STATE;
+    					me->state_dest = 'A';
     				}
     			}
     			me->naviStateBack = INITIALPOSE_STATE;
@@ -416,7 +386,7 @@ void *autostateHandle_thread(void* ptr)
     			me->naviState = TERMINATE_STATE;
     			break;
     		}
-    		sleep(1);//1s
+    		sleep(2);//1s
     		me->StateBack = AUTO_NAVI;
     		break;
     	default:

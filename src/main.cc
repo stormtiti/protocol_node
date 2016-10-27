@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
 
   ros::init(argc, argv, "gui_node");
   signal(SIGINT, shutdown);
-  static  char recback;
+  static unsigned char recback;
   ros::NodeHandle nh;
   myState = new AutoState;
   SerialPort mySerial;
@@ -82,18 +82,6 @@ int main(int argc, char** argv) {
   ros::Rate loop_rate(10);
   while (ros::ok()) {
 	unsigned char ackStatus,ackDest;
-
-//	mySerial.data0 = TestBuf[testCnt][0];
-//	mySerial.data1 = TestBuf[testCnt][1];
-
-	myState->setReceive(mySerial.data0, mySerial.data1);
-	if(recback != mySerial.data0)
-	{
-//		 ROS_INFO("[REC_Data]:%d,%d",mySerial.data0,mySerial.data1);
-		 recback = mySerial.data0;
-	}
-
-
 	testCnt++;
 	if(testCnt >= 12)
 	{
@@ -102,9 +90,15 @@ int main(int argc, char** argv) {
 	unsigned char buf[2];
 	if(!myState->AcktoAndriod(ackStatus,ackDest))
 	{
+		recback = ackStatus;
+		if(recback != ackStatus)
+		{
+			ROS_INFO("[Status]:ackStatus: %x,ackDest: %x",ackStatus,ackDest);
+			recback = ackStatus;
+		}
 		buf[0] = ackStatus;
 		buf[1] = ackDest;
-		mySerial.writeData(&buf[0],2);
+
 	}
     ros::spinOnce();
     loop_rate.sleep();

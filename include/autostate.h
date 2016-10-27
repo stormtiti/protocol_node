@@ -45,7 +45,7 @@ public:
     char 		  inittimes;
     unsigned char initialPose_aim;
     unsigned char initialPose_aimBak;
-
+    char		  iloopCnt;
     pthread_t AutoStateRecCmd_thread;
 	pthread_t AutoState_thread;
 	geometry_msgs::Twist cmd_vel;
@@ -55,6 +55,7 @@ public:
 	ros::Publisher Goal_pub;
 	ros::Publisher Pause_pub;
 	ros::Publisher Init_pos_pub;
+
 
 	void setCurrobotPos(geometry_msgs::PoseWithCovarianceStamped acml_msgs);
 	void SendStop();
