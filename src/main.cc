@@ -24,7 +24,7 @@
 #include "autostate.h"
 #include "serialport.h"
 #include <fstream>
-
+#include <std_msgs/Int16.h>
 AutoState  *myState;
 geometry_msgs::Twist cmd_vel;
 ros::Publisher move_pub;
@@ -33,6 +33,14 @@ void updatapose(const geometry_msgs::PoseWithCovarianceStamped& acml_msgs)
 	double x,y,z;
 	myState->setCurrobotPos(acml_msgs);
 }
+
+void goalRead_fun(const std_msgs::Int16 &goalreached)
+{
+	double x,y,z;
+	printf("goalreaded flag is:%d \n",goalreached.data);
+	myState->setCurrRobotState(goalreached.data);
+}
+
 void shutdown(int sig) {
   ROS_INFO("[GUI_Node] disconnect gui node ...");
   ros::shutdown();
@@ -77,6 +85,7 @@ int main(int argc, char** argv) {
   myState = new AutoState;
   SerialPort mySerial;
   ros::Subscriber Pose_sub = nh.subscribe("amcl_pose",10,updatapose);
+  ros::Subscriber goalReach_sub = nh.subscribe("goal_reached",10,goalRead_fun);
   ROS_INFO("[GUI_Node] launch ...");
   sleep(2);
   ros::Rate loop_rate(10);

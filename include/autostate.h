@@ -34,6 +34,8 @@ public:
     unsigned char goto_aim;
     unsigned char goto_aimBak;
     unsigned char goto_goalStatus;
+    int		      goto_goalStatusFlag;
+    int 		  goalreach_timeoutcnt;
     int 		  goto_aimDelay;
     bool		  sendgoalFLag;
 
@@ -57,6 +59,7 @@ public:
 	ros::Publisher Init_pos_pub;
 
 	void setCurrobotPos(geometry_msgs::PoseWithCovarianceStamped acml_msgs);
+	void setCurrRobotState(int istate);//1:reached 0:unreached
 	void SendStop();
 	void SendInitPos(float x, float y,float a);
 	/// Set Receive

@@ -165,6 +165,11 @@ void AutoState::setCurrobotPos(geometry_msgs::PoseWithCovarianceStamped acml_msg
 	robot_pose.pose.pose.orientation.z 	= acml_msgs.pose.pose.orientation.z;
 }
 
+
+void AutoState::setCurrRobotState(int istate)
+{
+	goto_goalStatusFlag = istate;
+}
 void AutoState::setReceive(unsigned char cmd, unsigned char dest)
 {
 	state_cmd = cmd;
@@ -173,6 +178,7 @@ void AutoState::setReceive(unsigned char cmd, unsigned char dest)
 
 int AutoState::AcktoAndriod(unsigned char &ack,unsigned char &dest)
 {
+	//base time is 100ms,mian.cc call this function
 	if(StateBack == MANUAL)
 	{
 		ack = MANUAL;
@@ -196,13 +202,24 @@ int AutoState::AcktoAndriod(unsigned char &ack,unsigned char &dest)
 						if((abs(robot_pose.pose.pose.position.x - pos.x) < 0.3)
 							&& (abs(robot_pose.pose.pose.position.y - pos.y) < 0.3))
 						{
-							goto_goalStatus = GOTO_ACK_ARRIVE;
-							ack = GOTO_ACK_ARRIVE;
-							dest = tagPos[i].name;
-
+							//start timeout
+							goalreach_timeoutcnt++;
+							//time base is 100ms ,100 = 10s
+							if((goalreach_timeoutcnt > 100) || (goto_goalStatusFlag == 1))
+							{
+								goto_goalStatus = GOTO_ACK_ARRIVE;
+								ack = GOTO_ACK_ARRIVE;
+								dest = tagPos[i].name;
+							}
+							else
+							{
+								goto_goalStatus = GOTO_ACK_PROCESS;
+							}
+							//
 						}
 						else
 						{
+							goalreach_timeoutcnt = 0;
 							goto_goalStatus = GOTO_ACK_PROCESS;
 							ack = GOTO_ACK_PROCESS;
 							dest = tagPos[i].name;
@@ -376,6 +393,7 @@ void *autostateHandle_thread(void* ptr)
         						pos.y = tagPos[i].y;
         						pos.a = tagPos[i].theta;
         						me->SendNextPos(pos);
+
         						me->sendgoalFLag = true;
         						me->goto_aimBak = me->goto_aim;
 
